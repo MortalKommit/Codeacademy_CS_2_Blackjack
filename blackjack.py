@@ -18,6 +18,9 @@ for rank in ranks:
 #logging object configuration (root logger)
 logging.basicConfig(filename='app.log', filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
 
+class NotEnoughMoneyError(Exception):
+    def __init__(self, money, bet):
+        print('Money: ', money, ' < ', ' Bet:', bet)
 #Tries to shuffle deck using random.org's True Randomness API
 def shuffle_deck(cards):
     payload = {'min':0, 'max': len(cards) - 1, 'col':1, 'base':10, 'format':'plain', 'rnd':'new'}
@@ -35,10 +38,16 @@ def shuffle_deck(cards):
             cards[int(order[index])] = card
 
 class Player:
-    def __init__(self):
+    def __init__(self, money):
         self.cards = []
         self.current_hand_value = 0
         self.name = 'Player'
+        self.money = money
+
+    def bet(self, amount):
+        self.wager = amount
+        self.money -= amount
+
     def play_game(self, deck):
         self.game_end = False
         print('Player turn!')
@@ -57,7 +66,10 @@ class Player:
         self.show_cards()   
     #Shows dealer's cards if game_end = True
     def show_cards(self):
-        print('Player hand:',self.cards, self.current_hand_value)
+        print('Player hand:',self.cards, self.current_hand_value, end='')
+        if self.wager:
+            print(' Money:[', self.money, ']  Current Bet:[', self.wager, ']')
+        
     def update_value(self):
         self.current_hand_value = 0
         #1st pass counts non-Ace values
@@ -77,6 +89,7 @@ class Player:
     def check_current_hand(self):
         if self.current_hand_value == 21:
             print('Blackjack!', self.name + ' wins!')
+            self.money += 2 * self.wager
             self.game_end = True
             return True
         elif self.current_hand_value > 21:
@@ -86,12 +99,13 @@ class Player:
         return False
 
 
-
 class Dealer(Player):
-    def __init__(self):
+    #Ideally dealer should not have a money limit
+    def __init__(self, money):
         self.cards = []
         self.current_hand_value = 0
         self.name = 'Dealer'
+        self.money = money
     #Override dealer's show cards to hide remaining card unless game end
     def show_cards(self, game_end = False):
         if not game_end:
@@ -110,9 +124,10 @@ class Dealer(Player):
             else:
                 return False
         else:
+            ''' Alternative dealer_strategy of hit/stand based on probability of 
+            safe draw '''
             no_of_cards_that_bust = 0
             no_of_safe_cards = 0
-
             for card in cards:
                 if 'Ace' not in card:
                     if card_values[card] + self.current_hand_value > 21:
@@ -120,7 +135,7 @@ class Dealer(Player):
                     elif card_values[card] + self.current_hand_value > player.current_hand_value:
                         no_of_safe_cards += 1
                 else:
-                    #Ace only counts as bust if it's value as 1 also counts as bust
+                    #Check if either Ace's value as 1 or 11 can cause bust
                     if 1 + self.current_hand_value > 21:
                         no_of_cards_that_bust += 1
                     elif card_values[card] + self.current_hand_value > player.current_hand_value:
@@ -144,37 +159,72 @@ class Dealer(Player):
         self.show_cards(game_end = True)
         self.compare_hands(player)
 
+    #Override player check_current_hand() method, house should not gain money
+    def check_current_hand(self):
+        if self.current_hand_value == 21:
+            print('Blackjack!', self.name + ' wins!')
+            self.game_end = True
+            return True
+        elif self.current_hand_value > 21:
+            self.game_end = True
+            print(self.name + ' Bust!')
+            return True
+        return False
+
     def compare_hands(self, player):
         if player.current_hand_value == self.current_hand_value:
             print("Push!")
+            #Player recoups bet
+            player.money += player.wager
         elif player.current_hand_value > self.current_hand_value:
             print("Player wins!")
+            player.money += 2 * player.wager
         else:
             print("House wins!")
 
 def play_blackjack():
+    
     play_again = True
-    while play_again:
-
-        #New deck of cards every
+    gamble_choice = True if input('Play with stakes?(y/n):').upper() == 'Y' else False
+    
+    print('\n\n::::::::     Blackjack     ::::::::\n\n')
+    #Start both player and dealer with 500  
+    player = Player(500)
+    dealer = Dealer(500)
+    while play_again or (gamble_choice and player.money >= 25):
+        print('\n###     New Round     ###\n')
+        #New deck of cards every round
         cards = list(card_values.keys())
-        print('::::::::     Blackjack     ::::::::\n\n')
-        player = Player()
-        dealer = Dealer()
-        
-        #Set cards to None at start of round to overwrite previous values
+
+        #Set cards to new list at start of round, shuffle deck
         player.cards = list()
         dealer.cards = list()
         shuffle_deck(cards)
-
+        if gamble_choice:
+            bet = 0
+            while bet not in (10, 25, 50, 100) and player.money < bet:
+                try:
+                    bet = int(input('Choose initial bet(25/50/100):'))
+                    if bet not in (10, 25, 50, 100):
+                        raise ValueError
+                    if player.money - bet < 0:
+                        raise NotEnoughMoneyError(player.money, bet)
+                except ValueError:
+                    print('Invalid bet! Enter a number in the valid bet range (max 100).')
+                except NotEnoughMoneyError:
+                    print('Invalid bet! Bet must be less than or equal to remaining funds.')
+            player.bet(bet)
         player.deal_cards(cards, 2)
         dealer.deal_cards(cards, 2)
+
         player.play_game(cards)
         if not player.game_end:
             dealer.play_game(cards, player)
-        choice = input('Play again?(y/n):')
-        if choice.upper() == 'Y':
+        choice = input('Play again?(y/n):').upper()
+        if choice == 'Y':
             play_again = True
         else:
             play_again = False
+    if gamble_choice:
+        print('\nYour total cashout: ', player.money)
 play_blackjack()
